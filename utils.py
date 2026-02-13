@@ -146,13 +146,6 @@ def compute_ecg_bandpowers(
     f, Pxx = welch(ecg_qc, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
 
     # 3) Bandpower
-    def bandpower_from_psd(f, Pxx, band):
-        lo, hi = band
-        m = (f >= lo) & (f <= hi)
-        if not np.any(m):
-            return 0.0
-        return float(np.trapz(Pxx[m], f[m]))
-
     P_in = bandpower_from_psd(f, Pxx, in_band)
     P_out = bandpower_from_psd(f, Pxx, out_band)
     ratio = P_out / (P_in + 1e-12)
