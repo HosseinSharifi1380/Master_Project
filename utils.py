@@ -158,3 +158,76 @@ def compute_ecg_bandpowers(
         "Pxx": Pxx,
         "ecg_qc": ecg_qc
     }
+
+def compute_ecg_bandpowers(
+    ecg_signal,
+    fs=250,
+    in_band=(15, 40),
+    out_band=(45, 100),
+    hp=0.5,
+    notch_hz=50.0,
+    notch_q=30.0,
+    nperseg_sec=2.0,
+    noverlap_ratio=0.8,
+    apply_qc_filter=True,
+):
+    """
+    Apply (optional) QC filter to ECG and compute PSD and bandpowers.
+
+    Parameters
+    ----------
+    ecg_signal : array-like
+        Raw ECG samples
+    fs : float
+        Sampling frequency
+    in_band : tuple
+        Low-frequency band for P_in
+    out_band : tuple
+        High-frequency band for P_out
+    hp : float
+        High-pass frequency for QC filter (used if apply_qc_filter=True)
+    notch_hz : float
+        Notch frequency for powerline (used if apply_qc_filter=True)
+    notch_q : float
+        Notch Q factor (used if apply_qc_filter=True)
+    nperseg_sec : float
+        Length of segment (sec) for Welch
+    noverlap_ratio : float
+        Fraction of segment overlap
+    apply_qc_filter : bool
+        If True, apply ecg_qc_filter before PSD. If False, use raw signal.
+
+    Returns
+    -------
+    dict
+        'P_in', 'P_out', 'ratio', 'f', 'Pxx', 'ecg_used'
+    """
+    x = np.asarray(ecg_signal, dtype=float)
+
+    # 1) Optional QC filter
+    if apply_qc_filter:
+        ecg_used = ecg_qc_filter(x, fs=fs, hp=hp, notch_hz=notch_hz, notch_q=notch_q)
+    else:
+        ecg_used = x
+
+    # 2) Welch PSD
+    nperseg = int(round(nperseg_sec * fs))
+    nperseg = min(nperseg, len(ecg_used))
+    noverlap = int(noverlap_ratio * nperseg)
+
+    f, Pxx = welch(ecg_used, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+
+    # 3) Bandpower
+    P_in = bandpower_from_psd(f, Pxx, in_band)
+    P_out = bandpower_from_psd(f, Pxx, out_band)
+    ratio = P_out / (P_in + 1e-12)
+
+    return {
+        "P_in": P_in,
+        "P_out": P_out,
+        "ratio": ratio,
+        "f": f,
+        "Pxx": Pxx,
+        "ecg_used": ecg_used,
+        "ecg_raw": ecg_signal,
+    }
