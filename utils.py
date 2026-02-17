@@ -1,4 +1,9 @@
 import numpy as np
+import pandas as pd
+import zipfile
+import pickle
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from scipy.signal import butter, filtfilt, iirnotch, welch
 
 def bandpass(ecg, fs, low=0.5, high=10, order=4):
@@ -166,6 +171,7 @@ def compute_ecg_bandpowers(
         "ecg_used": ecg_used,
         "ecg_raw": ecg_signal,
     }
+
 
 def _runs_of_true(mask: np.ndarray):
     """Return list of (start, end) index pairs for contiguous True regions. end is exclusive."""
@@ -356,3 +362,71 @@ def detect_bad_segments_hf_energy(
 
     return bad_mask, bad_segments, info
 
+
+def load_pkl_from_zip(z, file_name):
+    # Read a single .pkl member from an already-open ZipFile object
+    with z.open(file_name) as f:
+        return pickle.load(f)
+    
+def plot_ecg_bad_segments_from_zip(
+    zip_path: str,
+    n_files: int = 7,
+    start_idx: int = 0,
+    fs: float = 250,
+    detector_kwargs: dict | None = None,
+    keep_sources: bool = False,
+    show: bool = True,
+):
+    """
+    Plot ECG signals from a zip of pickle files and overlay detected bad regions.
+
+    detector_kwargs: dict of keyword args passed to detect_bad_segments_hf_energy
+    keep_sources: if True, keep PSD/Glitch masks in info (heavier)
+    show: if True, calls plt.show(). Otherwise returns fig/axes for further editing.
+    """
+
+    detector_kwargs = detector_kwargs or {}
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        names = z.namelist()
+        selected = names[start_idx : start_idx + n_files]
+
+        fig, axes = plt.subplots(len(selected), 1, figsize=(14, 2.2 * len(selected)), sharex=False)
+        if len(selected) == 1:
+            axes = [axes]
+
+        for ax, name in zip(axes, selected):
+            data = load_pkl_from_zip(z, name)
+
+            ecg_raw = np.asarray(data["zephyr"]["ECG"]["EcgWaveform"], dtype=float)
+            ecg_time = pd.to_datetime(data["zephyr"]["ECG"]["Time"])
+
+            bad_mask, _, info = detect_bad_segments_hf_energy(
+                ecg_raw,
+                fs=fs,
+                keep_sources=keep_sources,
+                **detector_kwargs,
+            )
+            bad_mask_psd = info['bad_mask_psd']
+            bad_mask_glitch = info['bad_mask_glitch']
+
+            ecg_bad = np.full_like(ecg_raw, np.nan, dtype=float)
+            ecg_bad[bad_mask] = ecg_raw[bad_mask]
+
+            ax.plot(ecg_time, ecg_raw, lw=0.8, label="Raw ECG")
+            ax.plot(ecg_time, ecg_raw[bad_mask_psd], 'r.', label="Bad regions(PSD)")
+            ax.plot(ecg_time, ecg_raw[bad_mask_glitch], 'g.', label="Bad regions(glitch)")
+
+            
+            # ax.plot(ecg_time, ecg_bad, lw=1.2, label="Bad regions")
+            ax.legend(loc="upper right")
+
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+            ax.set_title(name, fontsize=9)
+            ax.grid(True, alpha=0.3)
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        return fig, axes
