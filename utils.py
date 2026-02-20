@@ -359,6 +359,8 @@ def detect_bad_segments_hf_energy(
         info["bad_mask_psd_only"] = bad_mask_psd & ~bad_mask_glitch
         info["bad_mask_glitch_only"] = bad_mask_glitch & ~bad_mask_psd
         info["bad_mask_both"] = bad_mask_psd & bad_mask_glitch
+        if apply_qc_filter:
+            info["ecg_used"] = x_qc
 
     return bad_mask, bad_segments, info
 
@@ -409,18 +411,26 @@ def plot_ecg_bad_segments_from_zip(
             )
             bad_mask_psd = info['bad_mask_psd']
             bad_mask_glitch = info['bad_mask_glitch']
+            ecg_filtered = info["ecg_used"]
 
-            ecg_bad = np.full_like(ecg_raw, np.nan, dtype=float)
-            ecg_bad_PSD = np.full_like(ecg_raw, np.nan, dtype=float)
-            ecg_bad_glitch = np.full_like(ecg_raw, np.nan, dtype=float)
+            # ecg_bad = np.full_like(ecg_raw, np.nan, dtype=float)
+            # ecg_bad_PSD = np.full_like(ecg_raw, np.nan, dtype=float)
+            # ecg_bad_glitch = np.full_like(ecg_raw, np.nan, dtype=float)
+            ecg_bad = np.full_like(ecg_filtered, np.nan, dtype=float)
+            ecg_bad_PSD = np.full_like(ecg_filtered, np.nan, dtype=float)
+            ecg_bad_glitch = np.full_like(ecg_filtered, np.nan, dtype=float)
 
-            ecg_bad[bad_mask] = ecg_raw[bad_mask]
-            ecg_bad_PSD[bad_mask_psd] = ecg_raw[bad_mask_psd]
-            ecg_bad_glitch[bad_mask_glitch] = ecg_raw[bad_mask_glitch]
+            # ecg_bad[bad_mask] = ecg_raw[bad_mask]
+            # ecg_bad_PSD[bad_mask_psd] = ecg_raw[bad_mask_psd]
+            # ecg_bad_glitch[bad_mask_glitch] = ecg_raw[bad_mask_glitch]
+            ecg_bad[bad_mask] = ecg_filtered[bad_mask]
+            ecg_bad_PSD[bad_mask_psd] = ecg_filtered[bad_mask_psd]
+            ecg_bad_glitch[bad_mask_glitch] = ecg_filtered[bad_mask_glitch]
 
-            ax.plot(ecg_time, ecg_raw, lw=0.8, label="Raw ECG")
-            ax.plot(ecg_time, ecg_bad_PSD, 'r.', label="Bad regions(PSD)")
-            ax.plot(ecg_time, ecg_bad_glitch, 'g.', label="Bad regions(glitch)")
+            # ax.plot(ecg_time, ecg_raw, lw=0.8, label="Raw ECG")
+            ax.plot(ecg_time, ecg_filtered, lw=0.8, label="Raw ECG")
+            ax.plot(ecg_time, ecg_bad_PSD, 'r.', lw=0.8, label="Bad regions(PSD)")
+            ax.plot(ecg_time, ecg_bad_glitch, 'g.',lw=0.8, label="Bad regions(glitch)")
 
             
             # ax.plot(ecg_time, ecg_bad, lw=1.2, label="Bad regions")
