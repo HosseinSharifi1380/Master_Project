@@ -102,7 +102,7 @@ def ecg_qc_filter(x, fs, hp=0.5, notch_hz=50.0, notch_q=30.0):
 def compute_ecg_bandpowers(
     ecg_signal,
     fs=250,
-    in_band=(15, 40),
+    in_band=(0.5, 40),
     out_band=(45, 100),
     hp=0.5,
     notch_hz=50.0,
@@ -204,6 +204,12 @@ def detect_bad_segments_hf_energy(
     thr_fixed: float | None = None,
     thr_alpha: float = 6.0,
 
+    # Absolute thresholds
+    pin_low: float = 20.0,
+    pin_high: float = 10000.0,
+    snr_min: float = 20.0,
+    useful_ratio_min: float = 0.95,
+
     # Optional QC filtering
     apply_qc_filter: bool = True,
     hp: float = 0.5,
@@ -260,6 +266,9 @@ def detect_bad_segments_hf_energy(
     centers = starts + win // 2
 
     Pouts = np.zeros_like(starts, dtype=float)
+    Pins = np.zeros_like(starts, dtype=float)
+    SNRs = np.zeros_like(starts, dtype=float)
+    useful_ratios = np.zeros_like(starts, dtype=float)
 
     # IMPORTANT: seg is already from x_qc => disable QC inside compute_ecg_bandpowers
     for i, s in enumerate(starts):
@@ -268,13 +277,16 @@ def detect_bad_segments_hf_energy(
         res = compute_ecg_bandpowers(
             seg,
             fs=fs,
-            in_band=(15, 40),           # not used for P_out (kept for compatibility)
+            in_band=(0.5, 40),           # not used for P_out (kept for compatibility)
             out_band=(out_lo, out_hi),
             nperseg_sec=nperseg_sec,
             noverlap_ratio=noverlap_ratio,
             apply_qc_filter=False,
         )
         Pouts[i] = res["P_out"]
+        Pins[i] = res["P_in"]
+        SNRs[i] = Pins[i] / Pouts[i]
+        useful_ratios[i] = Pins[i] / (Pouts[i]+Pins[i])
 
     # Threshold on PSD bandpower
     if thr_method == "fixed":
@@ -291,7 +303,11 @@ def detect_bad_segments_hf_energy(
     else:
         raise ValueError("thr_method must be 'robust' or 'fixed'")
 
-    bad_win = Pouts > thr
+    bad_win = ((Pouts > thr) |       
+        (Pins < pin_low)  |        # very low power (lead-off / flat)
+        (Pins > pin_high) |        # saturation / huge motion
+        (SNRs < snr_min)  |        # poor SNR
+        (useful_ratios < useful_ratio_min))  # energy not concentrated in ECG band
 
     bad_mask_psd = np.zeros(n, dtype=bool)
     for s, is_bad in zip(starts, bad_win):
@@ -346,7 +362,10 @@ def detect_bad_segments_hf_energy(
 
     info = {
         "Pout": Pouts,
-        "threshold": thr,
+        "Pin": Pins,
+        "SNR": SNRs,
+        "Pin": Pins,
+        "useful_ratio": useful_ratios,
     }
 
     if keep_sources:
