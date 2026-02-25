@@ -395,7 +395,7 @@ def plot_ecg_bad_segments_from_zip(
     start_idx: int = 0,
     fs: float = 250,
     detector_kwargs: dict | None = None,
-    keep_sources: bool = False,
+    keep_sources: bool = True,
     show: bool = True,
 ):
     """
@@ -447,9 +447,9 @@ def plot_ecg_bad_segments_from_zip(
             ecg_bad_glitch[bad_mask_glitch] = ecg_filtered[bad_mask_glitch]
 
             # ax.plot(ecg_time, ecg_raw, lw=0.8, label="Raw ECG")
-            ax.plot(ecg_time, ecg_filtered, lw=0.8, label="Raw ECG")
-            ax.plot(ecg_time, ecg_bad_PSD, 'r.', lw=0.8, label="Bad regions(PSD)")
-            ax.plot(ecg_time, ecg_bad_glitch, 'g.',lw=0.8, label="Bad regions(glitch)")
+            ax.plot(ecg_time, ecg_filtered, label="Raw ECG")
+            ax.plot(ecg_time, ecg_bad_PSD, 'r.', alpha = 0.6, label="Bad regions(PSD)")
+            ax.plot(ecg_time, ecg_bad_glitch, 'g.', alpha = 0.6, label="Bad regions(glitch)")
 
             
             # ax.plot(ecg_time, ecg_bad, lw=1.2, label="Bad regions")
