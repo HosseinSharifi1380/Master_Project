@@ -422,7 +422,7 @@ def plot_ecg_bad_segments_from_zip(
             ecg_raw = np.asarray(data["zephyr"]["ECG"]["EcgWaveform"], dtype=float)
             ecg_time = pd.to_datetime(data["zephyr"]["ECG"]["Time"])
 
-            bad_mask, _, info = detect_bad_segments_hf_energy(
+            bad_mask, bad_segment, info = detect_bad_segments_hf_energy(
                 ecg_raw,
                 fs=fs,
                 keep_sources=keep_sources,
@@ -448,8 +448,9 @@ def plot_ecg_bad_segments_from_zip(
 
             # ax.plot(ecg_time, ecg_raw, lw=0.8, label="Raw ECG")
             ax.plot(ecg_time, ecg_filtered, label="Raw ECG")
-            ax.plot(ecg_time, ecg_bad_PSD, 'r.', alpha = 0.6, label="Bad regions(PSD)")
-            ax.plot(ecg_time, ecg_bad_glitch, 'g.', alpha = 0.6, label="Bad regions(glitch)")
+            ax.plot(ecg_time, ecg_bad, 'r', alpha = 0.6, label="Bad regions(PSD)")
+            # ax.plot(ecg_time, ecg_bad_PSD, 'r.', alpha = 0.6, label="Bad regions(PSD)")
+            # ax.plot(ecg_time, ecg_bad_glitch, 'g.', alpha = 0.6, label="Bad regions(glitch)")
 
             
             # ax.plot(ecg_time, ecg_bad, lw=1.2, label="Bad regions")
@@ -463,4 +464,4 @@ def plot_ecg_bad_segments_from_zip(
         fig.tight_layout()
         if show:
             plt.show()
-        return fig, axes
+        return fig, axes, bad_segment
