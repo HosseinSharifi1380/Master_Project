@@ -4,7 +4,11 @@ import zipfile
 import pickle
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from scipy.signal import butter, filtfilt, iirnotch, welch
+from scipy.signal import butter, filtfilt, iirnotch, welch, resample
+import scipy.io as scio
+from tqdm.notebook import tqdm
+
+import neurokit2 as nk
 
 def bandpass(ecg, fs, low=0.5, high=10, order=4):
     """
@@ -465,3 +469,239 @@ def plot_ecg_bad_segments_from_zip(
         if show:
             plt.show()
         return fig, axes, bad_segment
+
+
+# ============================================================
+# RR validation
+# ============================================================
+def is_valid_rr_window(rpeaks_window, fs):
+    """
+    Check whether RR intervals are physiologically valid.
+    """
+
+    rr = np.diff(rpeaks_window) / fs
+
+    # RR interval physiological range
+    if np.any(rr < 0.3):
+        return False
+
+    if np.any(rr > 1.5):
+        return False
+
+    # Sudden RR jumps
+    if np.any(np.abs(np.diff(rr)) > 0.3):
+        return False
+
+    return True
+
+
+# ============================================================
+# Main processing function
+# ============================================================
+def process_pkl_to_mat(
+    z,
+    pkl_file_name,
+    fs=250,
+    target_len=760
+):
+
+    """
+    Process one PKL file and return:
+
+    save_ECG : shape (M,762)
+
+    Columns:
+        0:759 -> ECG cycle
+        760   -> CGM
+        761   -> PKL ID
+    """
+
+    # ========================================================
+    # Load PKL from ZIP
+    # ========================================================
+    # with zipfile.ZipFile(zip_path, "r") as z:
+
+    #     with z.open(pkl_file_name) as f:
+    #         data = pickle.load(f)
+
+    with z.open(pkl_file_name) as f:
+        data = pickle.load(f)
+
+    # ========================================================
+    # Extract CGM
+    # ========================================================
+    cgm_value = float(data["glucose"])
+
+    # ========================================================
+    # Extract ECG
+    # ========================================================
+    ecg_raw = np.asarray(data["zephyr"]["ECG"]["EcgWaveform"],dtype=float)
+
+
+    # ========================================================
+    # Detect bad ECG regions
+    # ========================================================
+    bad_mask, bad_segments, info = detect_bad_segments_hf_energy(ecg_raw,fs=fs)
+
+    ecg_filtered = info["ecg_used"]
+
+    # ========================================================
+    # Good segments
+    # ========================================================
+    good_mask = ~bad_mask
+    good_segments = _runs_of_true(good_mask)
+
+    # ========================================================
+    # Collect valid windows
+    # ========================================================
+    valid_windows = []
+
+    for (start, end) in good_segments:
+
+        segment = ecg_filtered[start:end]
+
+        # Skip too-short segments
+        if len(segment) < 2 * fs:
+            continue
+
+        try:
+
+            # =================================================
+            # R-peak detection
+            # =================================================
+            _, nk_info = nk.ecg_peaks(segment, sampling_rate=fs)
+
+            rpeaks_local = nk_info["ECG_R_Peaks"]
+
+            # Convert local -> global indices
+            rpeaks_global = rpeaks_local + start
+
+            # =================================================
+            # Build NON-overlapping windows
+            # 21 R-peaks -> 20 cycles
+            # =================================================
+
+            i = 0
+
+            while i + 20 < len(rpeaks_global):
+
+                window = rpeaks_global[i:i+21]
+
+                if is_valid_rr_window(window, fs):
+                    valid_windows.append(window)
+                    # jump forward -> no overlap
+                    i += 20
+                else:
+                    i += 1
+
+        except Exception as e:
+            print("R-PEAK ERROR:", e)
+            continue
+
+    # ========================================================
+    # Extract cycles + resample
+    # ========================================================
+    all_cycles_resampled = []
+
+    for window in valid_windows:
+
+        for i in range(len(window) - 1):
+
+            s = int(window[i])
+            e = int(window[i+1])
+
+            cycle = ecg_filtered[s:e]
+
+            # Safety check
+            if len(cycle) < 10:
+                continue
+
+            # Resample cycle to 760
+            cycle_resampled = resample(cycle, target_len)
+
+            all_cycles_resampled.append(cycle_resampled)
+
+    # ========================================================
+    # Convert to numpy
+    # ========================================================
+    all_cycles_resampled = np.array(all_cycles_resampled, dtype=np.float32) # shape : ( (N window * 20), 760 )
+    # No valid cycles
+    if len(all_cycles_resampled) == 0:
+        return None
+
+
+    # ========================================================
+    # Create CGM column
+    # ========================================================
+    cgm_column = np.full( (all_cycles_resampled.shape[0], 1), cgm_value, dtype=np.float32)  # shape : ( (N window * 20), 1 )
+    pkl_id = int(pkl_file_name.split(".")[0])
+    pkl_column = np.full( (all_cycles_resampled.shape[0], 1), pkl_id, dtype=np.float32)     # shape : ( (N window * 20), 1 )
+    # ========================================================
+    # Final MATLAB matrix
+    # ========================================================
+    save_ECG = np.hstack([all_cycles_resampled, cgm_column, pkl_column])
+
+
+    return save_ECG
+
+def process_zip_to_mat(
+    zip_path,
+    output_mat_path,
+    fs=250,
+    target_len=760
+):
+
+    """
+    Process all PKL files inside ZIP
+    and create one MATLAB dataset.
+    """
+
+    all_save_ECG = []
+
+    # ========================================================
+    # Find all PKL files
+    # ========================================================
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        pkl_files = [ f for f in z.namelist()if f.endswith(".pkl")]
+        # ========================================================
+        # Loop over PKLs
+        # ========================================================
+        for idx, pkl_file in enumerate(tqdm(pkl_files, desc="Processing PKL files")):          
+
+            try:
+                temp = process_pkl_to_mat(
+                    z=z,
+                    pkl_file_name=pkl_file,
+                    fs=fs,
+                    target_len=target_len
+                )
+
+                if temp is None:
+                    continue
+
+                all_save_ECG.append(temp)
+                # print(f"[{idx+1}/{len(pkl_files)}] OK:", pkl_file, temp.shape)
+                print(f"[{idx+1:5}/{len(pkl_files)}] OK:, {pkl_file:>12}, {str(temp.shape):>12}")
+
+            except Exception as e:
+                print(f"[{idx+1}/{len(pkl_files)}] ERROR:", pkl_file)
+                print(e)
+
+    # ========================================================
+    # Final concatenation
+    # ========================================================
+    all_save_ECG = np.vstack(all_save_ECG)
+
+    # ========================================================
+    # Save MATLAB
+    # ========================================================
+    scio.savemat(output_mat_path, {"save_ECG": all_save_ECG})
+
+    print("====================================")
+    print("FINAL DATASET CREATED")
+    print("Final shape:", all_save_ECG.shape)
+    print("Saved to:", output_mat_path)
+    print("====================================")
+
+    return all_save_ECG
