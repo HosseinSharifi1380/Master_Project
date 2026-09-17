@@ -2,3 +2,5 @@
 __pycache__/
 
 subject1.mat
+
+*.pth
