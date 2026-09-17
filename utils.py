@@ -603,12 +603,33 @@ def process_pkl_to_mat(
     # ========================================================
     all_cycles_resampled = []
 
+    PRE_R_RATIO = 0.30
+    POST_R_RATIO = 0.70
+
     for window in valid_windows:
 
         for i in range(len(window) - 1):
 
-            s = int(window[i])
-            e = int(window[i+1])
+            # s = int(window[i])
+            # e = int(window[i+1])
+
+            r_current = int(window[i])
+            r_next = int(window[i + 1])
+
+            # RR interval
+            rr = r_next - r_current
+
+            # Number of samples before and after current R-peak
+            pre_r = int(round(PRE_R_RATIO * rr))
+            post_r = int(round(POST_R_RATIO * rr))
+
+            # New window centered around R
+            s = r_current - pre_r
+            e = r_current + post_r
+
+            # Boundary check
+            if s < 0 or e > len(ecg_filtered):
+                continue
 
             cycle = ecg_filtered[s:e]
 
